@@ -1,0 +1,317 @@
+---
+title: ''
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+    fontsize: 12
+    geometry: margin=1.5
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache=TRUE)
+```
+
+
+```{r Preprocessing, echo=FALSE, message=FALSE, warning=FALSE, cache=TRUE}
+library(readxl)
+dataset_ps531 <- read_excel("/Users/adsrt367/Downloads/PS531/Final/ps531_final_data/dataset_ps531.xlsx")
+
+## Step 1: clean data
+library(dplyr)
+df <- filter(dataset_ps531, denominator!=0)  ## excluding non-active users, 87 users remain
+
+## transform all data types from origonal types (all string)
+df$CR_n<-as.numeric(df$CR) ## outcome variable, average completion rate on plans
+df$g<-as.factor(df$group) ## 0 for matched msg, 1 for mismatched, 2 for no msg
+df$msgTy<-as.factor(df$msgType) ## 0 for logical msg, 1 for emotional, 2 for no msg
+df$msg<-as.factor(df$message) ## classify g=0 or 1 to msg=1, means users do receive message, 0 not
+df$fb<-as.factor(df$feedback) ## 1 for msg along with systematic feedback
+df$rp<-as.factor(df$repetitiveness) ## 1 for repeat msg one more time 
+df$personality<-as.factor(df$mbti) ## 0 for thinking type, 1 for feeling type
+df$sex<-as.factor(df$gender) ## 0 for female
+df$age<-as.numeric(df$Age)
+df$exerFq<-as.numeric(df$exerciseFreq) ## the exercise habit (times/week)
+df$wei<-as.numeric(df$weight)
+df$wh<-as.factor(df$workingHour) ## 0 for less than 8hrs, 1 for 8-12, 2 for greater 12
+df$jT<-as.factor(df$jobType) ## 0 for white-collar, 1 for blue-colar , 2 otherwise
+df$coach<-as.factor(df$coachReco) ## download the app by recommendation from the coach
+
+## 3-Way Frequency Table 
+threeWayTable <- table(df$g, df$rp, df$fb) # column represent fb, row represent rp in different group
+
+#ftable(threeWayTable)
+```
+
+
+```{r H1, echo=FALSE, message=FALSE, warning=FALSE, cache=TRUE}
+## H1: People receiving motivational msg will have higher performance on the completion rate on exercise plan than those who do not receive motivational msg.
+
+## First, in order to test the treatment effect of msg, I fixed the other to treatments, fb & rp, as 0 (not treated) and split the dataset for the permutation test.
+set.seed(20180418)
+df_m1<- filter(df,rp==0) ##37 in total
+# summary(df_m1$msg) # 0:15, 1:22
+df_m1$treat <- 0
+df_m1$treat[sample(1:nrow(df_m1), 22)]<-1 
+
+## test statistic #20.95238
+obs_m1 <- summary(lm(df_m1$CR_n ~ df_m1$msg*df_m1$fb))$coef[2,1] # 20.95238
+y1<-df_m1$CR_n
+treat1<-df_m1$treat
+
+#install.packages("ri")
+require(ri)
+possibleVec <- genperms(df_m1$treat)  
+## Defaulting to approximate method
+  
+  refDistNull_m1 <- c()
+  for(ii in 1:ncol(possibleVec)){
+    currentVec <- possibleVec[,ii]
+    refDistNull_m1[ii] <- summary(lm(y1 ~ currentVec*df_m1$fb))$coef[2,1]
+  } 
+  p_m1<- mean(refDistNull_m1>=obs_m1) # 0.1666
+  twoP_m1 <- 2*min(mean(refDistNull_m1>=obs_m1),mean(refDistNull_m1<=obs_m1)) # 0.3332
+  plot(density(refDistNull_m1),lty=2)
+  abline(v=obs_m1)
+  
+  bstar = NULL
+  pstar = NULL
+  # error rate
+  errate <- function(y_sim){
+    shuffledz <- sample(treat1) 
+    sim <- summary(lm(y_sim ~ shuffledz*df_m1$fb, data=df_m1))$coef[2,1]
+    pvalnew <- mean(refDistNull_m1>=sim)
+  
+    re <- list(coef(lm(y_sim ~ shuffledz*df_m1$fb, data=df_m1)),pvalnew) 
+  return(re) 
+  }
+  set.seed(20180418)
+  results <- replicate(10000,errate(y_sim=y1)) 
+  
+  for(i in 1:10000){
+    bstar = rbind(bstar, results[,i][[1]])
+    pstar = cbind(pstar, results[,i][[2]])
+  }
+  errorrate <- mean(pstar< .05) # 0.0512
+  
+  Vb=var(bstar)
+  se = sqrt(diag(Vb))[2] # 20.95239 
+  
+```
+
+```{r H2, echo=FALSE, message=FALSE, warning=FALSE, cache=TRUE}
+# H2: People receive messages which match their personalities will have higher completion rate than receiving those do not match their personalities.
+set.seed(20180418)
+df_m2<- filter(df, g!=2 & rp==0) ##22 in total
+df_m2$matchness<-ifelse(df_m2$g==0,0,1)
+df_m2$g_match<-as.factor(df_m2$matchness)
+#summary(df_m2$g_match) # 0:8, 1:14
+df_m2$treat <- 0
+df_m2$treat[sample(1:nrow(df_m2), 14)]<-1 
+
+obs_m2 <- summary(lm(df_m2$CR_n ~ df_m2$g_match*df_m2$fb))$coef[2,1] #9.396825
+y2<-df_m2$CR_n
+treat2<-df_m2$treat
+
+
+#install.packages("ri")
+require(ri)
+pV_m2 <- genperms(df_m2$treat)  
+
+  refDistNull_m2 <- c()
+  for(ii in 1:ncol(pV_m2)){
+    currentVec <- pV_m2[,ii]
+    refDistNull_m2[ii] <- summary(lm(y2 ~ currentVec*df_m2$fb))$coef[2,1]
+  } 
+  p_m2<- mean(refDistNull_m2>=obs_m2) # 0.3478 
+  twoP_m2 <- 2*min(mean(refDistNull_m2>=obs_m2),mean(refDistNull_m2<=obs_m2)) # 0.6956
+  plot(density(refDistNull_m2),lty=2)
+  abline(v=obs_m2)
+  
+  bstar2 = NULL
+  pstar2 = NULL
+  # error rate
+  errate_m2 <- function(y_sim){
+    shuffledz <- sample(treat2) 
+    sim <- summary(lm(y_sim ~ shuffledz*df_m2$fb, data=df_m2))$coef[2,1]
+    pvalnew <- mean(refDistNull_m2>=sim)
+    
+    re <- list(coef(lm(y_sim ~ shuffledz*df_m2$fb, data=df_m2)), pvalnew)
+  return(re)
+  }
+  set.seed(20180418)
+  results_m2 <- replicate(10000,errate_m2(y_sim=y2))
+
+  for(i in 1:10000){
+    bstar2 = rbind(bstar2, results_m2[,i][[1]])
+    pstar2 = cbind(pstar2, results_m2[,i][[2]])
+  }
+  errorrate_m2 <- mean(pstar2< .05) # 0.0502
+  
+  Vb2=var(bstar2)
+  se2 = sqrt(diag(Vb2))[2] # 27.47699 
+  
+```
+
+```{r H3, echo=FALSE, message=FALSE, warning=FALSE, cache=TRUE}
+## H3. 
+set.seed(20180418)
+df_m3<- filter(df, msg==1) ##25 in total
+#summary(df_m3$rp) # 0:22, 1:32
+df_m3$treat <- 0
+df_m3$treat[sample(1:nrow(df_m3), 32)]<- 1 
+
+## test statistic 
+obs_m3 <- summary(lm(df_m3$CR_n ~ df_m3$rp*df_m3$fb))$coef[2,1] # 18.2563
+y3<-df_m3$CR_n
+treat3<-df_m3$treat
+
+#install.packages("ri")
+require(ri)
+pV_m3 <- genperms(df_m3$treat)  
+
+  refDistNull_m3 <- c()
+  for(ii in 1:ncol(pV_m3)){
+    currentVec <- pV_m3[,ii]
+    refDistNull_m3[ii] <- summary(lm(y3 ~ currentVec*df_m3$fb))$coef[2,1]
+  } 
+  p_m3<- mean(refDistNull_m3>=obs_m3) # 0.0328
+  twoP_m3 <- 2*min(mean(refDistNull_m3>=obs_m3),mean(refDistNull_m3<=obs_m3)) # 0.0656
+  plot(density(refDistNull_m3),lty=2)
+  abline(v=obs_m3)
+  
+  bstar3 = NULL
+  pstar3 = NULL
+  # error rate
+  errate_m3 <- function(y_sim){
+    shuffledz <- sample(treat3) 
+    sim <- summary(lm(y_sim ~ shuffledz*df_m3$fb, data=df_m3))$coef[2,1]
+    pvalnew <- mean(refDistNull_m3>=sim)
+    
+    re <- list(coef(lm(y_sim ~ shuffledz*df_m3$fb, data=df_m3)),pvalnew)
+  return(re)
+  }
+  set.seed(20180418)
+  results_m3 <- replicate(10000,errate_m3(y_sim=y3))
+  
+  for(i in 1:10000){
+    bstar3 = rbind(bstar3, results_m3[,i][[1]])
+    pstar3 = cbind(pstar3, results_m3[,i][[2]])
+  }
+  errorrate_m3 <- mean(pstar3< .05) # 0.0451
+  
+  Vb3=var(bstar3)
+  se3 = sqrt(diag(Vb3))[2] # 9.717443  
+  
+```
+ 
+```{r H4, echo=FALSE, message=FALSE, warning=FALSE, cache=TRUE}
+## H4. Providing systematic feedback along with msg will have synergy effect with msg.
+## First, in order to test the treatment effect of systematic feedback along with a msg, I fixed the other to treatments, msg=1 & rp=0, and split the dataset for the permutation test.
+set.seed(20180418)
+#summary(df$fb) # 0:42, 1:45
+df$treat <- 0
+df$treat[sample(1:nrow(df), 45)]<- 1 
+
+## test statistic 
+obs_m4 <- summary(lm(df$CR_n ~ df$fb*df$rp*df$msg))$coef[2,1] # 5.183199e-14
+y4<-df$CR_n 
+treat4<-df$treat
+
+#install.packages("ri")
+require(ri)
+pV_m4 <- genperms(df$treat) 
+
+  refDistNull_m4 <- c()
+  for(ii in 1:ncol(pV_m4)){
+    currentVec <- pV_m4[,ii]
+    refDistNull_m4[ii] <- summary(lm(y4 ~ currentVec*df$rp*df$msg))$coef[2,1]
+  } 
+  p_m4<- mean(refDistNull_m4>=obs_m4) # 0.4672
+  twoP_m4 <- 2*min(mean(refDistNull_m4>=obs_m4),mean(refDistNull_m4<=obs_m4)) # 0.9344
+  plot(density(refDistNull_m4),lty=2)
+  abline(v=obs_m4)
+  
+  bstar4 = NULL
+  pstar4 = NULL
+  # error rate
+  errate_m4 <- function(y_sim){
+    shuffledz <- sample(treat4) 
+    sim <- summary(lm(y_sim ~ shuffledz*df$rp*df$msg, data=df))$coef[2,1]
+    pvalnew <- mean(refDistNull_m4>=sim)
+    
+    re <- list(coef(lm(y_sim ~ shuffledz*df$rp*df$msg, data=df)),pvalnew)
+  return(re)
+  }
+  set.seed(20180418)
+  results_m4 <- replicate(10000,errate_m4(y_sim=y4))
+
+  for(i in 1:10000){
+    bstar4 = rbind(bstar4, results_m4[,i][[1]])
+    pstar4 = cbind(pstar4, results_m4[,i][[2]])
+  }
+  errorrate_m4 <- mean(pstar4< .05) # 0.0491
+  
+  Vb4=var(bstar4)
+  se4 = sqrt(diag(Vb4))[2] # 24.27718 
+
+```
+
+
+
+```{r BCI, echo=FALSE, message=FALSE, warning=FALSE, cache=TRUE}
+# Bootstrap 95% CI for regression coefficients 
+library(boot)
+
+# function to obtain regression weights 
+bs <- function(formula, data, indices) {
+  d <- data[indices,] # allows boot to select sample 
+  fit <- lm(formula, data=d)
+  return(coef(fit)) 
+} 
+
+#model 1
+set.seed(20180418)
+results1 <- boot(data=df_m1, statistic=bs, 
+  	R=10000, formula=CR_n~msg*fb)
+results1 # mean 20.95238, SE:20.05859
+boot.ci(results1, type="bca",index=2, conf=c(0.90,0.95)) 
+
+#model 2
+set.seed(20180418)
+results2 <- boot(data=df_m2, statistic=bs, 
+  	R=1000, formula=CR_n~g_match*fb)
+results2 # mean 9.396825, SE:31.38369
+boot.ci(results2, type="bca",index=2, conf=c(0.90,0.95)) 
+
+#model 3
+set.seed(20180418)
+results3 <- boot(data=df_m3, statistic=bs, 
+  	R=10000, formula=CR_n~rp*fb)
+results3 # mean 18.256303, SE:12.68158
+boot.ci(results3, type="bca",index=2, conf=c(0.93,0.95))   
+
+#model 4
+set.seed(20180418)
+results4 <- boot(data=df, statistic=bs, 
+  	R=10000, formula=CR_n~fb*rp*msg)
+results4 # mean 5.183199e-14, SE:24.68831
+boot.ci(results4, type="bca",index=2, conf=c(0.90,0.95))    
+```
+
+```{r ezPackage, echo=FALSE, message=FALSE, warning=FALSE, cache=TRUE}
+library(doMC);options(cores=4);registerDoMC()
+#install.packages("ez")
+library(ez)
+perm_1<-ezPerm( df, CR_n, ID,between = c(msg,fb,rp), perms = 1e3 , parallel = TRUE , alarm = TRUE)
+perm_1
+```
+
+
+```{r, results='asis', echo=FALSE}
+cat("\\newpage")
+```
+Code Appendix
+```{r appendix, ref.label=knitr::all_labels(),echo=TRUE,eval=FALSE}
+```
+
